@@ -4,12 +4,45 @@ import { analyzeReview } from './agent';
 
 export const router = express.Router();
 
-// Yeni review əlavə et və Claude ilə analiz et
+//Add a new review and analyze it with Claude
+router.post('/reviews', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { hotel_name, review_text, rating } = req.body;
+
+    const reviewResult = await client.query(
+      `INSERT INTO reviews (hotel_name, review_text, rating) 
+       VALUES ($1, $2, $3) RETURNING *`,
+      [hotel_name, review_text, rating]
+    );
+    const review = reviewResult.rows[0];
+
+    const analysis = await analyzeReview(review_text);
+
+    await client.query(
+      `INSERT INTO analysis 
+        (review_id, sentiment, summary, issues, tokens_used, processing_time_ms)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [review.id, analysis.sentiment, analysis.summary,
+      analysis.issues, analysis.tokensUsed, analysis.processingTimeMs]
+    );
+
+    await client.query('COMMIT');
+    res.json({ review, analysis });
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: String(error) });
+  } finally {
+    client.release();
+  }
+});
 router.post('/reviews', async (req, res) => {
   try {
     const { hotel_name, review_text, rating } = req.body;
 
-    // 1. Review-u bazaya saxla
     const reviewResult = await pool.query(
       `INSERT INTO reviews (hotel_name, review_text, rating) 
        VALUES ($1, $2, $3) RETURNING *`,
@@ -17,10 +50,13 @@ router.post('/reviews', async (req, res) => {
     );
     const review = reviewResult.rows[0];
 
-    // 2. Claude ilə analiz et
-    const analysis = await analyzeReview(review_text);
+    let analysis
+    try {
+      analysis = await analyzeReview(review_text);
+    } catch (error) {
+      throw new Error(`Claude API failed: ${error}`)
+    }
 
-    // 3. Analizi bazaya saxla
     await pool.query(
       `INSERT INTO analysis 
         (review_id, sentiment, summary, issues, tokens_used, processing_time_ms)
@@ -41,7 +77,7 @@ router.post('/reviews', async (req, res) => {
   }
 });
 
-// Bütün review-ları analiz ilə birlikdə gətir
+//Fetch all reviews along with their analysis
 router.get('/reviews', async (req, res) => {
   try {
     const { sentiment } = req.query;
@@ -70,7 +106,7 @@ router.get('/reviews', async (req, res) => {
   }
 });
 
-// Statistika - token xərci və performans
+//Statistics - token cost and performance
 router.get('/stats', async (req, res) => {
   try {
     const result = await pool.query(`

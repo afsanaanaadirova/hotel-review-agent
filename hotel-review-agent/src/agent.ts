@@ -18,13 +18,15 @@ export interface AnalysisResult {
 export async function analyzeReview(reviewText: string): Promise<AnalysisResult> {
   const startTime = Date.now();
 
-  const response = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 1024,
-    messages: [
-      {
-        role: 'user',
-        content: `Analyze this hotel review and respond ONLY with a JSON object, no extra text:
+  let response;
+  try {
+    response = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1024,
+      messages: [
+        {
+          role: 'user',
+          content: `Analyze this hotel review and respond ONLY with a JSON object, no extra text:
 
 Review: "${reviewText}"
 
@@ -33,14 +35,29 @@ Review: "${reviewText}"
   "summary": "one sentence summary",
   "issues": ["issue1", "issue2"]
 }`,
-      },
-    ],
-  });
+        },
+      ],
+    });
+  } catch (error) {
+    throw new Error(`Claude API failed: ${error}`);
+  }
 
   const processingTimeMs = Date.now() - startTime;
   const rawText = response.content[0].type === 'text' ? response.content[0].text : '';
   const cleanText = rawText.replace(/```json\n?|\n?```/g, '').trim();
-  const parsed = JSON.parse(cleanText);
+
+  let parsed
+  try {
+    parsed = JSON.parse(cleanText);
+  } catch (error) {
+    return {
+      sentiment: 'neutral',
+      summary: 'Analysis unavailable',
+      issues: [],
+      tokensUsed: 0,
+      processingTimeMs: Date.now() - startTime
+    }
+  }
 
   return {
     sentiment: parsed.sentiment,
