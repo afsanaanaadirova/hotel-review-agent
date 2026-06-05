@@ -12,6 +12,19 @@ router.post('/reviews', async (req, res) => {
 
     const { hotel_name, review_text, rating } = req.body;
 
+    // Validation
+    if (!hotel_name || !review_text || !rating) {
+      return res.status(400).json({
+        error: 'hotel_name, review_text and rating are required'
+      });
+    }
+
+    if (typeof rating !== 'number' || rating < 1 || rating > 5) {
+      return res.status(400).json({
+        error: 'rating must be a number between 1 and 5'
+      });
+    }
+
     const reviewResult = await client.query(
       `INSERT INTO reviews (hotel_name, review_text, rating) 
        VALUES ($1, $2, $3) RETURNING *`,
@@ -37,43 +50,6 @@ router.post('/reviews', async (req, res) => {
     res.status(500).json({ error: String(error) });
   } finally {
     client.release();
-  }
-});
-router.post('/reviews', async (req, res) => {
-  try {
-    const { hotel_name, review_text, rating } = req.body;
-
-    const reviewResult = await pool.query(
-      `INSERT INTO reviews (hotel_name, review_text, rating) 
-       VALUES ($1, $2, $3) RETURNING *`,
-      [hotel_name, review_text, rating]
-    );
-    const review = reviewResult.rows[0];
-
-    let analysis
-    try {
-      analysis = await analyzeReview(review_text);
-    } catch (error) {
-      throw new Error(`Claude API failed: ${error}`)
-    }
-
-    await pool.query(
-      `INSERT INTO analysis 
-        (review_id, sentiment, summary, issues, tokens_used, processing_time_ms)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [
-        review.id,
-        analysis.sentiment,
-        analysis.summary,
-        analysis.issues,
-        analysis.tokensUsed,
-        analysis.processingTimeMs,
-      ]
-    );
-
-    res.json({ review, analysis });
-  } catch (error) {
-    res.status(500).json({ error: String(error) });
   }
 });
 
